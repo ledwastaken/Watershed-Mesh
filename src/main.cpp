@@ -1,37 +1,47 @@
-#include <vtk/vtkActor.h>
-#include <vtk/vtkPolyDataMapper.h>
-#include <vtk/vtkRenderWindow.h>
-#include <vtk/vtkRenderWindowInteractor.h>
-#include <vtk/vtkRenderer.h>
-#include <vtk/vtkSmartPointer.h>
-#include <vtk/vtkSphereSource.h>
+#include <vtkActor.h>
+#include <vtkPolyDataMapper.h>
+#include <vtkRenderWindow.h>
+#include <vtkRenderWindowInteractor.h>
+#include <vtkRenderer.h>
+#include <vtkSmartPointer.h>
+#include <vtkOBJReader.h>
 
-int main()
+#include <iostream>
+#include <string>
+#include <cstdlib>
+
+int main(int argc, char* argv[])
 {
-  auto sphereSource = vtkSmartPointer<vtkSphereSource>::New();
-  sphereSource->SetRadius(5.0);
-  sphereSource->Update();
+  if (argc < 2)
+  {
+    std::cerr << "Usage: " << argv[0] << " model.obj" << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  std::string filename = argv[1];
+
+  auto reader = vtkSmartPointer<vtkOBJReader>::New();
+  reader->SetFileName(filename.c_str());
+  reader->Update();
 
   auto mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
-  mapper->SetInputConnection(sphereSource->GetOutputPort());
+  mapper->SetInputConnection(reader->GetOutputPort());
 
   auto actor = vtkSmartPointer<vtkActor>::New();
   actor->SetMapper(mapper);
 
   auto renderer = vtkSmartPointer<vtkRenderer>::New();
-  renderer->AddActor(actor);
-  renderer->SetBackground(0.1, 0.2, 0.3);
-
   auto renderWindow = vtkSmartPointer<vtkRenderWindow>::New();
+  auto interactor = vtkSmartPointer<vtkRenderWindowInteractor>::New();
+
   renderWindow->AddRenderer(renderer);
+  interactor->SetRenderWindow(renderWindow);
+  renderer->AddActor(actor);
+  renderer->SetBackground(0.1, 0.1, 0.1);
+
   renderWindow->SetSize(800, 600);
-
-  auto renderWindowInteractor =
-      vtkSmartPointer<vtkRenderWindowInteractor>::New();
-  renderWindowInteractor->SetRenderWindow(renderWindow);
-
   renderWindow->Render();
-  renderWindowInteractor->Start();
+  interactor->Start();
 
-  return 0;
+  return EXIT_SUCCESS;
 }
