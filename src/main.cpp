@@ -1,14 +1,19 @@
+#include <cstdlib>
+#include <iostream>
+#include <string>
+
 #include <vtkActor.h>
+#include <vtkCleanPolyData.h>
+#include <vtkCurvatures.h>
+#include <vtkOBJReader.h>
+#include <vtkPointData.h>
 #include <vtkPolyDataMapper.h>
 #include <vtkRenderWindow.h>
 #include <vtkRenderWindowInteractor.h>
 #include <vtkRenderer.h>
 #include <vtkSmartPointer.h>
-#include <vtkOBJReader.h>
-
-#include <iostream>
-#include <string>
-#include <cstdlib>
+#include <vtkParametricTorus.h>
+#include <vtkParametricFunctionSource.h>
 
 int main(int argc, char* argv[])
 {
@@ -24,8 +29,20 @@ int main(int argc, char* argv[])
   reader->SetFileName(filename.c_str());
   reader->Update();
 
+  auto polyData = reader->GetOutput();
+
+  auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+  cleaner->SetInputData(polyData);
+  cleaner->Update();
+
+  auto curvatureFilter = vtkSmartPointer<vtkCurvatures>::New();
+  curvatureFilter->SetInputData(cleaner->GetOutput());
+  // Options: ToMean, ToGaussian, ToMaximum, ToMinimum
+  curvatureFilter->SetCurvatureTypeToGaussian();
+  curvatureFilter->Update();
+
   auto mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
-  mapper->SetInputConnection(reader->GetOutputPort());
+  mapper->SetInputData(curvatureFilter->GetOutput());
 
   auto actor = vtkSmartPointer<vtkActor>::New();
   actor->SetMapper(mapper);

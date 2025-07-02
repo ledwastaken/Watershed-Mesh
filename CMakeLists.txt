@@ -2,11 +2,34 @@ cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
 project(watershed-mesh)
 
 find_package(VTK COMPONENTS 
+  IOGeometry
   CommonColor
   CommonCore
-  FiltersSources
-  IOGeometry
+  CommonDataModel
+  FiltersCore
+  FiltersGeneral
+  IOXML
   InteractionStyle
+  InteractionWidgets
+  RenderingAnnotation
+  RenderingContextOpenGL2
+  RenderingCore
+  RenderingFreeType
+  RenderingGL2PSOpenGL2
+  RenderingOpenGL2
+
+  CommonColor
+  CommonComputationalGeometry
+  CommonCore
+  CommonDataModel
+  CommonTransforms
+  FiltersCore
+  FiltersGeneral
+  FiltersModeling
+  FiltersSources
+  InteractionStyle
+  InteractionWidgets
+  RenderingAnnotation
   RenderingContextOpenGL2
   RenderingCore
   RenderingFreeType
