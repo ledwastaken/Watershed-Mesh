@@ -17,15 +17,20 @@
 #include <vtkPointData.h>
 #include <vtkPolyData.h>
 #include <vtkPolyDataMapper.h>
+#include <vtkProperty.h>
 #include <vtkRenderWindow.h>
 #include <vtkRenderWindowInteractor.h>
 #include <vtkRenderer.h>
 #include <vtkSmartPointer.h>
+#include <vtkUnsignedCharArray.h>
 
 // Special labels for the watershed algorithm
 #define UNLABELED -2
 #define IN_QUEUE -1
 #define WATERSHED 0
+
+// Random seed for reproducible results
+#define RANDOM_SEED 123
 
 // Priority queue element for watershed flooding
 struct QueueElement
@@ -135,14 +140,16 @@ public:
       // Assign label based on neighboring regions
       if (neighborLabels.size() > 1)
       {
+        // This point is on the boundary between multiple regions -> watershed
         m_Labels->SetValue(currentPointId, WATERSHED);
       }
       else if (neighborLabels.size() == 1)
       {
+        // This point belongs to a single region
         vtkIdType singleLabel = *neighborLabels.begin();
         m_Labels->SetValue(currentPointId, singleLabel);
 
-        // Add unlabeled neighbors to queue
+        // Add unlabeled neighbors to queue with slight priority randomization
         for (vtkIdType i = 0; i < neighborIds->GetNumberOfIds(); ++i)
         {
           vtkIdType neighborId = neighborIds->GetId(i);
@@ -153,6 +160,11 @@ public:
             m_PriorityQueue.push({ priority, neighborId });
           }
         }
+      }
+      else
+      {
+        // No labeled neighbors yet, mark as watershed for now
+        m_Labels->SetValue(currentPointId, WATERSHED);
       }
     }
 
@@ -169,13 +181,13 @@ public:
   }
 
 private:
-  // Select seed points using random sampling of low-curvature regions
+  // Select seed points using low-curvature regions
   int FindAndLabelSeeds()
   {
-    // Find points with low curvature (30th percentile)
+    // Use points with low curvature
     double range[2];
     m_Scalars->GetRange(range);
-    double threshold = range[0] + (range[1] - range[0]) * 0.3;
+    double threshold = range[0] + (range[1] - range[0]) * 0.2;
 
     std::vector<vtkIdType> candidates;
     for (vtkIdType i = 0; i < m_NumPoints; ++i)
@@ -189,32 +201,41 @@ private:
     std::cout << "Found " << candidates.size() << " candidate seed points"
               << std::endl;
 
-    // Randomly shuffle and select a subset
-    std::mt19937 rng(42);
+    // Randomly shuffle and select seeds for better segmentation
+    std::mt19937 rng(RANDOM_SEED);
     std::shuffle(candidates.begin(), candidates.end(), rng);
 
-    int numSeeds = std::min(static_cast<int>(candidates.size()),
-                            std::max(5, static_cast<int>(m_NumPoints / 100)));
+    int targetNumSeeds = std::min(static_cast<int>(candidates.size()),
+                                 std::max(5, static_cast<int>(m_NumPoints / 30)));
 
     std::vector<vtkIdType> selectedSeeds(candidates.begin(),
-                                         candidates.begin() + numSeeds);
+                                         candidates.begin() + targetNumSeeds);
 
-    // Remove seeds that are too close to each other
+    // Improve spatial distribution of seeds
     std::vector<vtkIdType> finalSeeds;
     for (const auto& seed : selectedSeeds)
     {
       bool tooClose = false;
       for (const auto& existingSeed : finalSeeds)
       {
-        if (std::abs(static_cast<int>(seed - existingSeed)) < m_NumPoints / 50)
+        // Minimum distance between seeds
+        int minDistance = m_NumPoints / 15;
+        if (std::abs(static_cast<int>(seed - existingSeed)) < minDistance)
         {
           tooClose = true;
           break;
         }
       }
+      
       if (!tooClose)
       {
         finalSeeds.push_back(seed);
+      }
+      
+      // Limit number of seeds to a reasonable maximum
+      if (finalSeeds.size() >= 20)
+      {
+        break;
       }
     }
 
@@ -313,7 +334,6 @@ int main(int argc, char* argv[])
             << " labels (including watershed)." << std::endl;
 
   // Print segmentation statistics
-
   vtkIdTypeArray* labels = vtkIdTypeArray::SafeDownCast(
       polyData->GetPointData()->GetArray("WatershedLabels"));
   std::vector<int> labelCounts(numLabels + 1, 0);
@@ -338,35 +358,62 @@ int main(int argc, char* argv[])
     }
   }
 
-  // Create visualization with color-coded regions
+  // Create RGB color array for visualization
+  auto colorArray = vtkSmartPointer<vtkUnsignedCharArray>::New();
+  colorArray->SetName("Colors");
+  colorArray->SetNumberOfComponents(3);
+  colorArray->SetNumberOfTuples(polyData->GetNumberOfPoints());
+
+  auto colors = vtkSmartPointer<vtkNamedColors>::New();
+  
+  // Generate random colors for each region (deterministic with fixed seed)
+  std::mt19937 colorRng(RANDOM_SEED); // Use same seed as other RNG for consistency
+  std::uniform_int_distribution<int> colorDist(50, 255); // Avoid very dark colors
+  
+  // Always keep watershed lines black
+  std::vector<std::array<unsigned char, 3>> colorMap;
+  colorMap.push_back({0, 0, 0}); // Label 0 (watershed) -> Black
+  
+  // Generate random colors for each region found
+  for (int i = 1; i < numLabels; ++i)
+  {
+    std::array<unsigned char, 3> color = {
+      static_cast<unsigned char>(colorDist(colorRng)),
+      static_cast<unsigned char>(colorDist(colorRng)),
+      static_cast<unsigned char>(colorDist(colorRng))
+    };
+    colorMap.push_back(color);
+  }
+  
+  std::cout << "Generated " << colorMap.size() - 1 << " random colors for regions" << std::endl;
+
+  // Assign colors to each point according to its label
+  for (vtkIdType i = 0; i < polyData->GetNumberOfPoints(); ++i)
+  {
+    int label = labels->GetValue(i);
+    if (label >= 0 && label < static_cast<int>(colorMap.size()))
+    {
+      colorArray->SetTuple3(i, colorMap[label][0], colorMap[label][1], colorMap[label][2]);
+    }
+    else
+    {
+      colorArray->SetTuple3(i, 128, 128, 128); // Gray for unrecognized labels
+    }
+  }
+  
+  polyData->GetPointData()->SetScalars(colorArray);
+
+  // Setup VTK visualization pipeline
   auto mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
   mapper->SetInputData(polyData);
   mapper->SetScalarModeToUsePointData();
-  mapper->SetColorModeToMapScalars();
-  mapper->SelectColorArray("WatershedLabels");
+  mapper->SetColorModeToDirectScalars();
+  mapper->SetInterpolateScalarsBeforeMapping(false);
 
-  // Setup color lookup table
-  auto lut = vtkSmartPointer<vtkLookupTable>::New();
-  lut->SetNumberOfTableValues(numLabels + 1);
-  lut->SetTableRange(0, numLabels);
-  lut->Build();
-
-  auto colors = vtkSmartPointer<vtkNamedColors>::New();
-  lut->SetTableValue(0, colors->GetColor4d("Black").GetData());
-
-  // Assign random colors to each region
-  std::mt19937 rng(42);
-  std::uniform_real_distribution<double> dist(0.0, 1.0);
-  for (int i = 1; i <= numLabels; ++i)
-  {
-    lut->SetTableValue(i, dist(rng), dist(rng), dist(rng), 1.0);
-  }
-
-  mapper->SetLookupTable(lut);
-
-  // Setup VTK rendering pipeline
   auto actor = vtkSmartPointer<vtkActor>::New();
   actor->SetMapper(mapper);
+  actor->GetProperty()->SetInterpolationToFlat();
+  actor->GetProperty()->LightingOff();
 
   auto renderer = vtkSmartPointer<vtkRenderer>::New();
   auto renderWindow = vtkSmartPointer<vtkRenderWindow>::New();
